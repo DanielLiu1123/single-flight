@@ -1,0 +1,3 @@
+description = "Single Flight is used to prevent the duplicate execution of expensive operations in concurrent environments"
+
+apply from: "${rootDir}/gradle/deploy.gradle"

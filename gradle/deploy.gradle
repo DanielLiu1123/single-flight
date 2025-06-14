@@ -1,0 +1,59 @@
+apply plugin: 'maven-publish'
+
+version = version as String
+version = System.getenv('RELEASE') ? version.substring(0, version.lastIndexOf('-SNAPSHOT')) : version
+
+java {
+    withSourcesJar()
+    withJavadocJar()
+}
+
+def githubUrl = 'https://github.com/DanielLiu1123/single-flight'
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            from components.java
+
+            // see https://docs.gradle.org/current/userguide/publishing_maven.html
+            versionMapping {
+                usage('java-api') {
+                    fromResolutionOf('runtimeClasspath')
+                }
+                usage('java-runtime') {
+                    fromResolutionResult()
+                }
+            }
+            pom {
+                url = "${githubUrl}"
+                name = project.name
+                description = project.description ?: ""
+                licenses {
+                    license {
+                        name = 'MIT License'
+                        url = 'https://opensource.org/license/mit'
+                        distribution = 'repo'
+                    }
+                }
+                developers {
+                    developer {
+                        id = 'Freeman'
+                        name = 'Freeman Liu'
+                        email = 'freemanlau1228@gmail.com'
+                    }
+                }
+                scm {
+                    connection = "scm:git:git://${githubUrl.substring(8)}.git"
+                    developerConnection = "scm:git:ssh@${githubUrl.substring(8)}.git"
+                    url = "${githubUrl}"
+                }
+            }
+        }
+    }
+
+    repositories {
+        maven {
+            url = "${rootDir}/build/staging-deploy"
+        }
+    }
+}

@@ -1,0 +1,32 @@
+name: Release Snapshot
+on:
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  release-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '8'
+          distribution: 'corretto'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build
+        run: ./gradlew build --no-daemon
+
+      - name: Release Snapshot
+        env:
+          MAVENCENTRAL_USERNAME: ${{ secrets.MAVENCENTRAL_USERNAME }}
+          MAVENCENTRAL_PASSWORD: ${{ secrets.MAVENCENTRAL_PASSWORD }}
+        run: |
+          ./gradlew publish jreleaserDeploy --no-daemon --stacktrace

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+set -e
+
+# format code
+./gradlew spotlessApply
+
+git add -u
