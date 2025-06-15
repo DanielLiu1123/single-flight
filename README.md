@@ -12,16 +12,24 @@ The [Single Flight pattern](https://www.codingexplorations.com/blog/understandin
 are executed **only once per key** when multiple threads request the same resource concurrently.
 
 ```text
-Without Single Flight:           With Single Flight:
-┌─────────────────────────┐     ┌─────────────────────────┐
-│ Thread 1 → Database     │     │ Thread 1 → Database     │
-│ Thread 2 → Database     │ ──► │ Thread 2 → Wait         │
-│ Thread 3 → Database     │     │ Thread 3 → Wait         │
-│ Thread 4 → Database     │     │ Thread 4 → Wait         │
-└─────────────────────────┘     └─────────────────────────┘
-   4 Database Calls                1 Database Call
-                                           ↓
-                                 All threads get same result
+Without Single Flight (same key "user:123"):
+┌──────────────────────────────────────────────────────────────┐
+│ Thread-1 ── key:"user:123" ──► DB Query-1 ──► Result-1       │
+│ Thread-2 ── key:"user:123" ──► DB Query-2 ──► Result-2       │
+│ Thread-3 ── key:"user:123" ──► DB Query-3 ──► Result-3       │
+│ Thread-4 ── key:"user:123" ──► DB Query-4 ──► Result-4       │
+└──────────────────────────────────────────────────────────────┘
+Result: 4 separate database calls for the same key
+        (All results are identical but computed 4 times)
+
+With Single Flight (same key "user:123"):
+┌──────────────────────────────────────────────────────────────┐
+│ Thread-1 ── key:"user:123" ──► DB Query-1 ──► Result-1       │
+│ Thread-2 ── key:"user:123" ──► Wait       ──► Result-1       │
+│ Thread-3 ── key:"user:123" ──► Wait       ──► Result-1       │
+│ Thread-4 ── key:"user:123" ──► Wait       ──► Result-1       │
+└──────────────────────────────────────────────────────────────┘
+Result: 1 database call, all threads share the same result/exception
 ```
 
 ## 🚀 Quick Start
