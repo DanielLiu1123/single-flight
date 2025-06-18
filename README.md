@@ -49,7 +49,7 @@ Result: 1 database call, all threads share the same result/exception
 **Gradle:**
 
 ```gradle
-implementation 'io.github.danielliu1123:single-flight:<latest>'
+implementation "io.github.danielliu1123:single-flight:<latest>"
 ```
 
 ### Usage
