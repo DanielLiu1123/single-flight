@@ -1,5 +1,6 @@
 package singleflight;
 
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 
 /**
@@ -11,6 +12,7 @@ final class Task {
 
     private final Supplier<?> task;
     private final SingleFlight.Options options;
+    private final ReentrantLock lock = new ReentrantLock();
 
     private volatile Result result;
 
@@ -19,31 +21,26 @@ final class Task {
         this.options = options;
     }
 
-    public synchronized Result run() {
+    public Result run() {
         Result r = result;
         if (r == null) {
+            lock.lock();
             try {
-                return result = new Result(task.get(), null);
-            } catch (Throwable e) {
-                return result = new Result(null, e);
+                r = result;
+                if (r == null) {
+                    try {
+                        r = new Result(task.get(), null);
+                    } catch (Throwable e) {
+                        r = new Result(null, e);
+                    }
+                    if (r.getException() == null || options.isCacheException()) {
+                        result = r;
+                    }
+                }
+            } finally {
+                lock.unlock();
             }
         }
-
-        // If no exception, return the successful result
-        if (r.getException() == null) {
-            return r;
-        }
-
-        if (options.isCacheException()) {
-            return r;
-        } else {
-            try {
-                // Cache the successful result
-                return result = new Result(task.get(), null);
-            } catch (Throwable e) {
-                // Do NOT cache the exception, because we already have one
-                return new Result(null, e);
-            }
-        }
+        return r;
     }
 }
