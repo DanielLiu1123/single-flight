@@ -148,22 +148,20 @@ public final class SingleFlight<K, V> {
         //    Only the first thread will create the task; others will get the existing one
         Task<V> task = invocationMap.computeIfAbsent(key, k -> new Task<>(supplier));
 
-        boolean shouldRemoveTask = true;
+        boolean exceptionOccurred = false;
         try {
             // 2) Execute the task - first thread runs the task, others wait
             //    The Task class ensures thread-safe execution and result sharing
             return task.run();
         } catch (Exception | Error e) {
-            // 3) Determine cleanup behavior based on recomputeOnException setting
-            //    - If recomputeOnException=true: remove task to allow re-execution
-            //    - If recomputeOnException=false: keep task to cache the exception
-            shouldRemoveTask = options.isRecomputeOnException();
+            exceptionOccurred = true;
             throw e;
         } finally {
-            // 4) Conditional cleanup based on execution outcome and configuration
-            //    For successful executions, always remove to prevent memory leaks
-            //    For exceptions, remove only if recomputeOnException=true
-            if (shouldRemoveTask) {
+            // 3) Cleanup logic based on execution outcome and configuration
+            //    - For successful executions: always remove to prevent memory leaks
+            //    - For exceptions with recomputeOnException=true: remove to allow retry
+            //    - For exceptions with recomputeOnException=false: keep to cache exception
+            if (!exceptionOccurred || options.isRecomputeOnException()) {
                 invocationMap.remove(key, task);
             }
         }
