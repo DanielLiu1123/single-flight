@@ -54,18 +54,63 @@ implementation "io.github.danielliu1123:single-flight:<latest>"
 
 ### Usage
 
+#### Basic Usage
+
 ```java
 // Using the global instance
 User user = SingleFlight.runDefault("user:123", () -> {
     return userService.loadUser("123");
 });
 
-// Using a dedicated instance
+// Using a dedicated instance with default options
 SingleFlight<String, User> userSingleFlight = new SingleFlight<>();
 
 User user = userSingleFlight.run("123", () -> {
     return userService.loadUser("123");
 });
+```
+
+#### Advanced Configuration
+
+```java
+// Configure exception handling behavior
+SingleFlight<String, User> singleFlight = new SingleFlight<>(
+    SingleFlight.Options.builder()
+        .recomputeOnException(false)  // Cache exceptions instead of recomputing
+        .build()
+);
+
+User user = singleFlight.run("123", () -> {
+    return userService.loadUser("123");
+});
+```
+
+#### Exception Handling Options
+
+**`recomputeOnException = true` (default)**
+- When a supplier throws an exception, subsequent calls with the same key will re-execute the supplier
+- Useful for transient failures that might succeed on retry
+
+**`recomputeOnException = false`**
+- When a supplier throws an exception, the exception is cached
+- Subsequent calls with the same key will immediately throw the cached exception without re-execution
+- Useful for preventing repeated expensive operations that are likely to fail consistently
+
+```java
+// Example: Cache validation failures to prevent repeated expensive checks
+SingleFlight<String, ValidationResult> validator = new SingleFlight<>(
+    SingleFlight.Options.builder()
+        .recomputeOnException(false)
+        .build()
+);
+
+try {
+    ValidationResult result = validator.run("expensive-validation", () -> {
+        return performExpensiveValidation();
+    });
+} catch (ValidationException e) {
+    // Exception is cached - subsequent calls will immediately throw this exception
+}
 ```
 
 ## 🤔 When to Use Single Flight

@@ -17,11 +17,18 @@ import java.util.function.Supplier;
  *     return fetchUserFromDatabase("123");
  * });
  *
- * // Using a dedicated instance
+ * // Using a dedicated instance with default options
  * SingleFlight<String, User> userSingleFlight = new SingleFlight<>();
- * User user = singleFlight.run("123", () -> {
+ * User user = userSingleFlight.run("123", () -> {
  *     return fetchUserFromDatabase("123");
  * });
+ *
+ * // Using custom options to cache exceptions
+ * SingleFlight<String, User> cachingExceptionsSF = new SingleFlight<>(
+ *     SingleFlight.Options.builder()
+ *         .recomputeOnException(false)
+ *         .build()
+ * );
  * }</pre>
  *
  * <h2>When to Use</h2>
@@ -86,9 +93,24 @@ public final class SingleFlight<K, V> {
      */
     private static final SingleFlight<Object, Object> DEFAULT = new SingleFlight<>();
 
+    private final Options options;
     private final ConcurrentMap<K, Task<V>> invocationMap = new ConcurrentHashMap<>();
 
-    public SingleFlight() {}
+    /**
+     * Creates a new SingleFlight instance with default options.
+     */
+    public SingleFlight() {
+        this(Options.DEFAULTS);
+    }
+
+    /**
+     * Creates a new SingleFlight instance with the specified options.
+     *
+     * @param options the options to use for this instance
+     */
+    public SingleFlight(Options options) {
+        this.options = options;
+    }
 
     /**
      * Executes the given supplier for the specified key, ensuring that concurrent calls
@@ -126,15 +148,24 @@ public final class SingleFlight<K, V> {
         //    Only the first thread will create the task; others will get the existing one
         Task<V> task = invocationMap.computeIfAbsent(key, k -> new Task<>(supplier));
 
+        boolean shouldRemoveTask = true;
         try {
             // 2) Execute the task - first thread runs the task, others wait
             //    The Task class ensures thread-safe execution and result sharing
             return task.run();
+        } catch (Exception | Error e) {
+            // 3) Determine cleanup behavior based on recomputeOnException setting
+            //    - If recomputeOnException=true: remove task to allow re-execution
+            //    - If recomputeOnException=false: keep task to cache the exception
+            shouldRemoveTask = options.isRecomputeOnException();
+            throw e;
         } finally {
-            // 3) Remove the task from the map to allow future re-computations
-            //    This cleanup is essential to prevent memory leaks and enable
-            //    sequential calls with the same key to execute again
-            invocationMap.remove(key, task);
+            // 4) Conditional cleanup based on execution outcome and configuration
+            //    For successful executions, always remove to prevent memory leaks
+            //    For exceptions, remove only if recomputeOnException=true
+            if (shouldRemoveTask) {
+                invocationMap.remove(key, task);
+            }
         }
     }
 
@@ -167,5 +198,80 @@ public final class SingleFlight<K, V> {
     @SuppressWarnings("unchecked")
     public static <K, V> V runDefault(K key, Supplier<V> supplier) {
         return ((SingleFlight<K, V>) DEFAULT).run(key, supplier);
+    }
+
+    /**
+     * Configuration options for SingleFlight behavior.
+     *
+     * <p>This class provides configuration options to customize how SingleFlight handles
+     * different scenarios, particularly exception handling and caching behavior.
+     *
+     * @since 0.2.0
+     */
+    public static final class Options {
+
+        /**
+         * Default options with recomputeOnException set to true (backward compatible behavior).
+         */
+        public static final Options DEFAULTS = new Options(true);
+
+        private final boolean recomputeOnException;
+
+        private Options(boolean recomputeOnException) {
+            this.recomputeOnException = recomputeOnException;
+        }
+
+        /**
+         * Creates a new Options builder.
+         *
+         * @return a new OptionsBuilder instance
+         */
+        public static OptionsBuilder builder() {
+            return new OptionsBuilder();
+        }
+
+        /**
+         * Returns whether exceptions should trigger recomputation on subsequent calls.
+         *
+         * <p>When {@code true} (default), if a supplier throws an exception, the task
+         * is removed from the cache and subsequent calls with the same key will execute
+         * the supplier again.
+         *
+         * <p>When {@code false}, exceptions are cached and subsequent calls with the
+         * same key will immediately throw the cached exception without re-executing
+         * the supplier.
+         *
+         * @return true if exceptions should trigger recomputation, false if exceptions should be cached
+         */
+        public boolean isRecomputeOnException() {
+            return recomputeOnException;
+        }
+
+        /**
+         * Builder for creating Options instances.
+         */
+        public static final class OptionsBuilder {
+            private boolean recomputeOnException = true; // Default to backward compatible behavior
+
+            /**
+             * Sets whether exceptions should trigger recomputation on subsequent calls.
+             *
+             * @param recomputeOnException true to recompute on exception, false to cache exceptions
+             * @return this builder instance
+             */
+            public OptionsBuilder recomputeOnException(boolean recomputeOnException) {
+                this.recomputeOnException = recomputeOnException;
+                return this;
+            }
+
+            /**
+             * Builds the Options instance.
+             *
+             * @return a new Options instance with the configured settings
+             */
+            public Options build() {
+                return new Options(recomputeOnException);
+            }
+        }
     }
 }

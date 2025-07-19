@@ -518,6 +518,228 @@ class SingleFlightTest {
         private final String value;
     }
 
+    @Test
+    void testRecomputeOnExceptionTrue() {
+        // Test default behavior: exceptions should trigger recomputation
+        SingleFlight<String, String> singleFlight = new SingleFlight<>(
+            SingleFlight.Options.builder()
+                .recomputeOnException(true)
+                .build()
+        );
+
+        String key = "recompute-exception-true-key";
+        AtomicInteger executionCount = new AtomicInteger(0);
+        RuntimeException firstException = new RuntimeException("First exception");
+        RuntimeException secondException = new RuntimeException("Second exception");
+
+        // First call should execute and throw exception
+        assertThatThrownBy(() -> singleFlight.run(key, () -> {
+            executionCount.incrementAndGet();
+            throw firstException;
+        })).isSameAs(firstException);
+
+        // Second call should execute again (recompute) and throw different exception
+        assertThatThrownBy(() -> singleFlight.run(key, () -> {
+            executionCount.incrementAndGet();
+            throw secondException;
+        })).isSameAs(secondException);
+
+        // Verify both executions happened
+        assertThat(executionCount.get()).isEqualTo(2);
+    }
+
+    @Test
+    void testRecomputeOnExceptionFalse() {
+        // Test exception caching: exceptions should NOT trigger recomputation
+        SingleFlight<String, String> singleFlight = new SingleFlight<>(
+            SingleFlight.Options.builder()
+                .recomputeOnException(false)
+                .build()
+        );
+
+        String key = "recompute-exception-false-key";
+        AtomicInteger executionCount = new AtomicInteger(0);
+        RuntimeException cachedException = new RuntimeException("Cached exception");
+
+        // First call should execute and throw exception
+        assertThatThrownBy(() -> singleFlight.run(key, () -> {
+            executionCount.incrementAndGet();
+            throw cachedException;
+        })).isSameAs(cachedException);
+
+        // Second call should NOT execute again, should throw cached exception
+        assertThatThrownBy(() -> singleFlight.run(key, () -> {
+            executionCount.incrementAndGet();
+            throw new RuntimeException("Should not be thrown");
+        })).isSameAs(cachedException);
+
+        // Verify only first execution happened
+        assertThat(executionCount.get()).isEqualTo(1);
+    }
+
+    @Test
+    void testConcurrentExceptionCaching() throws InterruptedException {
+        // Test concurrent access with exception caching disabled
+        SingleFlight<String, String> singleFlight = new SingleFlight<>(
+            SingleFlight.Options.builder()
+                .recomputeOnException(false)
+                .build()
+        );
+
+        String key = "concurrent-exception-caching-key";
+        RuntimeException testException = new RuntimeException("Concurrent cached exception");
+        AtomicInteger executionCount = new AtomicInteger(0);
+        int threadCount = 5;
+
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch completeLatch = new CountDownLatch(threadCount);
+        List<Exception> exceptions = Collections.synchronizedList(new ArrayList<>());
+
+        // Start multiple threads that will all try to execute the same failing supplier
+        for (int i = 0; i < threadCount; i++) {
+            new Thread(() -> {
+                try {
+                    startLatch.await();
+                    singleFlight.run(key, () -> {
+                        executionCount.incrementAndGet();
+                        sleep(50); // Simulate some work
+                        throw testException;
+                    });
+                } catch (Exception e) {
+                    exceptions.add(e);
+                } finally {
+                    completeLatch.countDown();
+                }
+            }).start();
+        }
+
+        startLatch.countDown();
+        assertThat(completeLatch.await(5, TimeUnit.SECONDS)).isTrue();
+
+        // Verify exception caching behavior
+        assertThat(executionCount.get()).isEqualTo(1); // Supplier executed only once
+        assertThat(exceptions).hasSize(threadCount); // All threads got the exception
+        assertThat(exceptions).allSatisfy(exception -> assertThat(exception).isSameAs(testException));
+
+        // Verify subsequent call also gets cached exception
+        assertThatThrownBy(() -> singleFlight.run(key, () -> {
+            executionCount.incrementAndGet();
+            return "should-not-execute";
+        })).isSameAs(testException);
+
+        // Execution count should still be 1
+        assertThat(executionCount.get()).isEqualTo(1);
+    }
+
+    @Test
+    void testSuccessfulResultsAlwaysCleanedUp() {
+        // Test that successful results are always cleaned up regardless of recomputeOnException setting
+        SingleFlight<String, String> singleFlightCacheExceptions = new SingleFlight<>(
+            SingleFlight.Options.builder()
+                .recomputeOnException(false)
+                .build()
+        );
+
+        String key = "success-cleanup-key";
+        AtomicInteger executionCount = new AtomicInteger(0);
+
+        // First successful call
+        String result1 = singleFlightCacheExceptions.run(key, () -> {
+            executionCount.incrementAndGet();
+            return "result-" + executionCount.get();
+        });
+
+        // Second call should execute again (successful results are always cleaned up)
+        String result2 = singleFlightCacheExceptions.run(key, () -> {
+            executionCount.incrementAndGet();
+            return "result-" + executionCount.get();
+        });
+
+        assertThat(result1).isEqualTo("result-1");
+        assertThat(result2).isEqualTo("result-2");
+        assertThat(executionCount.get()).isEqualTo(2);
+    }
+
+    @Test
+    void testDefaultOptionsBackwardCompatibility() {
+        // Test that default constructor maintains backward compatibility
+        SingleFlight<String, String> defaultSingleFlight = new SingleFlight<>();
+
+        String key = "backward-compatibility-key";
+        AtomicInteger executionCount = new AtomicInteger(0);
+        RuntimeException firstException = new RuntimeException("First exception");
+        RuntimeException secondException = new RuntimeException("Second exception");
+
+        // First call should execute and throw exception
+        assertThatThrownBy(() -> defaultSingleFlight.run(key, () -> {
+            executionCount.incrementAndGet();
+            throw firstException;
+        })).isSameAs(firstException);
+
+        // Second call should execute again (default behavior: recompute on exception)
+        assertThatThrownBy(() -> defaultSingleFlight.run(key, () -> {
+            executionCount.incrementAndGet();
+            throw secondException;
+        })).isSameAs(secondException);
+
+        // Verify both executions happened (backward compatible behavior)
+        assertThat(executionCount.get()).isEqualTo(2);
+    }
+
+    @Test
+    void testOptionsBuilderDefaults() {
+        // Test that Options.builder() creates options with correct defaults
+        SingleFlight.Options options = SingleFlight.Options.builder().build();
+        assertThat(options.isRecomputeOnException()).isTrue();
+
+        // Test that DEFAULTS constant has correct values
+        assertThat(SingleFlight.Options.DEFAULTS.isRecomputeOnException()).isTrue();
+    }
+
+    @Test
+    void testMixedSuccessAndExceptionWithCaching() throws InterruptedException {
+        // Test mixed scenarios with exception caching
+        SingleFlight<String, String> singleFlight = new SingleFlight<>(
+            SingleFlight.Options.builder()
+                .recomputeOnException(false)
+                .build()
+        );
+
+        AtomicInteger successExecutionCount = new AtomicInteger(0);
+        AtomicInteger exceptionExecutionCount = new AtomicInteger(0);
+
+        // Test successful result behavior (should always be cleaned up)
+        String successKey = "mixed-success-key";
+        String result1 = singleFlight.run(successKey, () -> {
+            successExecutionCount.incrementAndGet();
+            return "success-result-1";
+        });
+        String result2 = singleFlight.run(successKey, () -> {
+            successExecutionCount.incrementAndGet();
+            return "success-result-2";
+        });
+
+        assertThat(result1).isEqualTo("success-result-1");
+        assertThat(result2).isEqualTo("success-result-2");
+        assertThat(successExecutionCount.get()).isEqualTo(2);
+
+        // Test exception behavior (should be cached)
+        String exceptionKey = "mixed-exception-key";
+        RuntimeException cachedException = new RuntimeException("Cached exception");
+
+        assertThatThrownBy(() -> singleFlight.run(exceptionKey, () -> {
+            exceptionExecutionCount.incrementAndGet();
+            throw cachedException;
+        })).isSameAs(cachedException);
+
+        assertThatThrownBy(() -> singleFlight.run(exceptionKey, () -> {
+            exceptionExecutionCount.incrementAndGet();
+            throw new RuntimeException("Should not be thrown");
+        })).isSameAs(cachedException);
+
+        assertThat(exceptionExecutionCount.get()).isEqualTo(1);
+    }
+
     private static void sleep(long millis) {
         try {
             Thread.sleep(millis);
