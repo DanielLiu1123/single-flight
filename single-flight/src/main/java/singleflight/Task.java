@@ -1,56 +1,48 @@
 package singleflight;
 
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.FutureTask;
 import java.util.function.Supplier;
 
 /**
- * Internal task wrapper that ensures thread-safe, single execution of a supplier function.
- * This class is the core implementation detail that enables the single-flight pattern by
- * coordinating multiple threads to share the result of a single execution.
+ * A task to be executed by a {@link SingleFlight} instance.
  *
- * @param <T> the type of the result produced by the supplier function.
- *            Can be any type including {@code null}.
- * @author Freeman Liu
+ * @author Freeman
  */
-final class Task<T> {
+final class Task {
 
-    private final FutureTask<T> task;
+    private final Supplier<?> task;
+    private final SingleFlight.Options options;
 
-    public Task(Supplier<? extends T> supplier) {
-        if (supplier == null) {
-            throw new IllegalArgumentException("supplier must not be null");
-        }
-        this.task = new FutureTask<>(supplier::get);
+    private volatile Result result;
+
+    public Task(Supplier<?> supplier, SingleFlight.Options options) {
+        this.task = supplier;
+        this.options = options;
     }
 
-    public T run() {
-        // Ensure only one run() invocation executes the supplier
-        // Multiple calls to FutureTask.run() are safe - only the first one executes
-        if (!task.isDone()) {
-            task.run();
+    public synchronized Result run() {
+        Result r = result;
+        if (r == null) {
+            try {
+                return result = new Result(task.get(), null);
+            } catch (Throwable e) {
+                return result = new Result(null, e);
+            }
         }
 
-        try {
-            // Block until the result is available
-            // This is efficient - threads are parked, not spinning
-            return task.get();
-        } catch (InterruptedException ie) {
-            // Restore the interrupt flag and wrap in unchecked exception
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while waiting for task execution", ie);
-        } catch (ExecutionException ee) {
-            // Unwrap and re-throw the original exception
-            Throwable cause = ee.getCause();
+        // If no exception, return the successful result
+        if (r.getException() == null) {
+            return r;
+        }
 
-            // Preserve the original exception type when possible
-            if (cause instanceof RuntimeException) {
-                throw (RuntimeException) cause;
-            } else if (cause instanceof Error) {
-                throw (Error) cause;
-            } else {
-                // Wrap checked exceptions in unchecked exception
-                throw new IllegalStateException("Task execution failed", cause);
+        if (options.isCacheException()) {
+            return r;
+        } else {
+            try {
+                // Cache the successful result
+                return result = new Result(task.get(), null);
+            } catch (Throwable e) {
+                // Do NOT cache the exception, because we already have one
+                return new Result(null, e);
             }
         }
     }

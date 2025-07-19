@@ -55,13 +55,22 @@ implementation "io.github.danielliu1123:single-flight:<latest>"
 ### Usage
 
 ```java
-// Using the global instance
+// 1. Using the global instance
 User user = SingleFlight.runDefault("user:123", () -> {
     return userService.loadUser("123");
 });
 
-// Using a dedicated instance
+// 2. Using a dedicated instance
+
+// 2-1. Using default options
 SingleFlight<String, User> userSingleFlight = new SingleFlight<>();
+
+// 2-2. Using custom options
+SingleFlight<String, User> userSingleFlight = new SingleFlight<>(
+    SingleFlight.Options.builder()
+        .cacheException(true)
+        .build()
+);
 
 User user = userSingleFlight.run("123", () -> {
     return userService.loadUser("123");

@@ -3,6 +3,8 @@ package singleflight;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Supplier;
+import lombok.Builder;
+import lombok.Getter;
 
 /**
  * A high-performance, thread-safe "single-flight" utility that prevents duplicate execution
@@ -17,11 +19,20 @@ import java.util.function.Supplier;
  *     return fetchUserFromDatabase("123");
  * });
  *
- * // Using a dedicated instance
+ * // Using a dedicated instance with default options
  * SingleFlight<String, User> userSingleFlight = new SingleFlight<>();
- * User user = singleFlight.run("123", () -> {
+ *
+ * // Using a dedicated instance with custom options
+ * SingleFlight<String, User> userSingleFlight = new SingleFlight<>(
+ *     SingleFlight.Options.builder()
+ *         .cacheException(true)
+ *         .build()
+ * );
+ *
+ * User user = userSingleFlight.run("123", () -> {
  *     return fetchUserFromDatabase("123");
  * });
+ *
  * }</pre>
  *
  * <h2>When to Use</h2>
@@ -86,9 +97,24 @@ public final class SingleFlight<K, V> {
      */
     private static final SingleFlight<Object, Object> DEFAULT = new SingleFlight<>();
 
-    private final ConcurrentMap<K, Task<V>> invocationMap = new ConcurrentHashMap<>();
+    private final Options options;
+    private final ConcurrentMap<K, Task> invocationMap = new ConcurrentHashMap<>();
 
-    public SingleFlight() {}
+    /**
+     * Creates a new SingleFlight instance with default options.
+     */
+    public SingleFlight() {
+        this(Options.DEFAULT);
+    }
+
+    /**
+     * Creates a new SingleFlight instance with the specified options.
+     *
+     * @param options the options to use for this instance
+     */
+    public SingleFlight(Options options) {
+        this.options = options;
+    }
 
     /**
      * Executes the given supplier for the specified key, ensuring that concurrent calls
@@ -111,7 +137,7 @@ public final class SingleFlight<K, V> {
      * @throws IllegalArgumentException if {@code key} or {@code supplier} is {@code null}
      * @throws RuntimeException         if the supplier throws a {@code RuntimeException}
      * @throws Error                    if the supplier throws an {@code Error}
-     * @throws IllegalStateException    if the execution is interrupted or fails unexpectedly
+     * @throws IllegalStateException    if the execution throws an unexpected exception type
      * @see #runDefault(Object, Supplier)
      */
     public V run(K key, Supplier<V> supplier) {
@@ -124,17 +150,50 @@ public final class SingleFlight<K, V> {
 
         // 1) Atomically create or fetch a Task for the key
         //    Only the first thread will create the task; others will get the existing one
-        Task<V> task = invocationMap.computeIfAbsent(key, k -> new Task<>(supplier));
+        Task task = invocationMap.computeIfAbsent(key, k -> new Task(supplier, options));
 
         try {
             // 2) Execute the task - first thread runs the task, others wait
             //    The Task class ensures thread-safe execution and result sharing
-            return task.run();
+            Result result = task.run();
+
+            Throwable e = result.getException();
+            if (e == null) {
+                return getValue(result);
+            }
+
+            handleException(e);
+
+            // Never happen
+            return null;
         } finally {
-            // 3) Remove the task from the map to allow future re-computations
-            //    This cleanup is essential to prevent memory leaks and enable
-            //    sequential calls with the same key to execute again
+            // 3) Clean up the task from the map
+            //    Ensures that the next call with the same key will execute the task again
             invocationMap.remove(key, task);
+        }
+    }
+
+    private V getValue(Result result) {
+        try {
+            @SuppressWarnings("unchecked")
+            V v = (V) result.getValue();
+            return v;
+        } catch (ClassCastException e) {
+            throw new IllegalStateException("Result type mismatch", e);
+        }
+    }
+
+    private static void handleException(Throwable e) {
+        if (e instanceof Exception) {
+            if (e instanceof RuntimeException) {
+                throw (RuntimeException) e;
+            } else {
+                throw new IllegalStateException("Execution failed", e);
+            }
+        } else if (e instanceof Error) {
+            throw (Error) e;
+        } else {
+            throw new IllegalStateException("Unexpected exception type", e);
         }
     }
 
@@ -161,11 +220,45 @@ public final class SingleFlight<K, V> {
      * @throws IllegalArgumentException if {@code key} or {@code supplier} is {@code null}
      * @throws RuntimeException         if the supplier throws a {@code RuntimeException}
      * @throws Error                    if the supplier throws an {@code Error}
-     * @throws IllegalStateException    if the execution is interrupted or fails unexpectedly
+     * @throws IllegalStateException    if the execution throws an unexpected exception type
      * @see #run(Object, Supplier)
      */
     @SuppressWarnings("unchecked")
     public static <K, V> V runDefault(K key, Supplier<V> supplier) {
         return ((SingleFlight<K, V>) DEFAULT).run(key, supplier);
+    }
+
+    /**
+     * Configuration options for SingleFlight behavior.
+     *
+     * <p>This class provides configuration options to customize how SingleFlight handles
+     * different scenarios, particularly exception handling and caching behavior.
+     *
+     * @since 0.2.0
+     */
+    @Builder(toBuilder = true)
+    @Getter
+    public static final class Options {
+
+        /**
+         * Whether to cache exceptions.
+         *
+         * <p> If {@code true}, exceptions thrown by the task
+         * will be cached and subsequent calls with the same key will immediately throw the
+         * cached exception without re-executing the task.
+         *
+         * <p> If {@code false}, subsequent calls will re-execute the task.
+         *
+         * <p>Default is {@code false}.
+         *
+         * @since 0.2.0
+         */
+        private boolean cacheException;
+
+        /**
+         * Default options.
+         */
+        public static final Options DEFAULT =
+                Options.builder().cacheException(false).build();
     }
 }

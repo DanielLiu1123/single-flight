@@ -131,8 +131,8 @@ class SingleFlightTest {
         startLatch.countDown();
         assertThat(completeLatch.await(5, TimeUnit.SECONDS)).isTrue();
 
-        // With exception caching, supplier should execute only once
-        assertThat(executionCount.get()).isEqualTo(1);
+        // cacheException defaults to false, so all threads should execute the task
+        assertThat(executionCount.get()).isEqualTo(threadCount);
 
         // Verify all threads received the same exception
         assertThat(exceptions).hasSize(threadCount);
@@ -442,7 +442,7 @@ class SingleFlightTest {
         assertThat(completeLatch.await(5, TimeUnit.SECONDS)).isTrue();
 
         // Verify exception caching behavior
-        assertThat(executionCount.get()).isEqualTo(1); // Supplier executed only once
+        assertThat(executionCount.get()).isEqualTo(3); // cacheException defaults to false, so all threads execute
         assertThat(caughtExceptions).hasSize(threadCount); // All threads got the exception
         assertThat(caughtExceptions)
                 .allSatisfy(exception -> assertThat(exception).isSameAs(testException)); // Same exception instance
