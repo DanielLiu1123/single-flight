@@ -24,7 +24,7 @@ final class Task {
         if (r == null) {
             try {
                 return result = new Result(task.get(), null);
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 return result = new Result(null, e);
             }
         }
@@ -40,7 +40,7 @@ final class Task {
             try {
                 // Cache the successful result
                 return result = new Result(task.get(), null);
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 // Do NOT cache the exception, because we already have one
                 return new Result(null, e);
             }

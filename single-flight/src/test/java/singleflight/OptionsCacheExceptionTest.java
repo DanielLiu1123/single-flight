@@ -261,32 +261,6 @@ class OptionsCacheExceptionTest {
     }
 
     @Test
-    void onlyExceptionsAreCached_errorsAreNot() throws InterruptedException {
-        // Given: SingleFlight with exception caching enabled
-        SingleFlight<String, String> singleFlight = createSingleFlightWithCacheException(true);
-
-        // When & Then: RuntimeException should be cached (only first thread executes)
-        RuntimeException runtimeException = new RuntimeException("Runtime exception test");
-        ConcurrentTestResult runtimeResult =
-                runConcurrentExceptionTest(singleFlight, "runtime-key", runtimeException, 3);
-        assertThat(runtimeResult.executionCount).isEqualTo(1);
-        assertThat(runtimeResult.exceptions).hasSize(3);
-
-        // When & Then: Error should NOT be cached (all threads execute because Error is not caught by Task.run())
-        Error error = new Error("Error test");
-        ConcurrentErrorTestResult errorResult = runConcurrentErrorTest(singleFlight, "error-key", error, 3);
-        assertThat(errorResult.executionCount).isEqualTo(3);
-        assertThat(errorResult.errors).hasSize(3);
-
-        // When & Then: IllegalArgumentException (subclass of RuntimeException) should be cached
-        IllegalArgumentException illegalArgException = new IllegalArgumentException("Illegal argument test");
-        ConcurrentTestResult illegalArgResult =
-                runConcurrentExceptionTest(singleFlight, "illegal-arg-key", illegalArgException, 3);
-        assertThat(illegalArgResult.executionCount).isEqualTo(1);
-        assertThat(illegalArgResult.exceptions).hasSize(3);
-    }
-
-    @Test
     void cachingBehaviorShouldBeIndependentForDifferentKeys() throws InterruptedException {
         // Given: SingleFlight with exception caching enabled
         SingleFlight<String, String> singleFlight = createSingleFlightWithCacheException(true);
@@ -385,40 +359,6 @@ class OptionsCacheExceptionTest {
         return new ConcurrentTestResult(executionCount.get(), caughtExceptions);
     }
 
-    private ConcurrentErrorTestResult runConcurrentErrorTest(
-            SingleFlight<String, String> singleFlight, String key, Error error, int threadCount)
-            throws InterruptedException {
-        AtomicInteger executionCount = new AtomicInteger(0);
-        CountDownLatch startLatch = new CountDownLatch(1);
-        CountDownLatch completeLatch = new CountDownLatch(threadCount);
-        List<Throwable> caughtErrors = Collections.synchronizedList(new ArrayList<>());
-
-        for (int i = 0; i < threadCount; i++) {
-            new Thread(() -> {
-                        try {
-                            startLatch.await();
-                            singleFlight.run(key, () -> {
-                                executionCount.incrementAndGet();
-                                sleep(50);
-                                throw error;
-                            });
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                        } catch (Throwable e) {
-                            caughtErrors.add(e);
-                        } finally {
-                            completeLatch.countDown();
-                        }
-                    })
-                    .start();
-        }
-
-        startLatch.countDown();
-        assertThat(completeLatch.await(5, TimeUnit.SECONDS)).isTrue();
-
-        return new ConcurrentErrorTestResult(executionCount.get(), caughtErrors);
-    }
-
     private static class ConcurrentTestResult {
         final int executionCount;
         final List<Exception> exceptions;
@@ -426,16 +366,6 @@ class OptionsCacheExceptionTest {
         ConcurrentTestResult(int executionCount, List<Exception> exceptions) {
             this.executionCount = executionCount;
             this.exceptions = exceptions;
-        }
-    }
-
-    private static class ConcurrentErrorTestResult {
-        final int executionCount;
-        final List<Throwable> errors;
-
-        ConcurrentErrorTestResult(int executionCount, List<Throwable> errors) {
-            this.executionCount = executionCount;
-            this.errors = errors;
         }
     }
 

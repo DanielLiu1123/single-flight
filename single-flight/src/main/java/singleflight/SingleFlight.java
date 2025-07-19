@@ -21,16 +21,18 @@ import lombok.Getter;
  *
  * // Using a dedicated instance with default options
  * SingleFlight<String, User> userSingleFlight = new SingleFlight<>();
+ *
+ * // Using a dedicated instance with custom options
+ * SingleFlight<String, User> userSingleFlight = new SingleFlight<>(
+ *     SingleFlight.Options.builder()
+ *         .cacheException(true)
+ *         .build()
+ * );
+ *
  * User user = userSingleFlight.run("123", () -> {
  *     return fetchUserFromDatabase("123");
  * });
  *
- * // Using custom options to cache exceptions
- * SingleFlight<String, User> cachingExceptionsSF = new SingleFlight<>(
- *     SingleFlight.Options.builder()
- *         .recomputeOnException(false)
- *         .build()
- * );
  * }</pre>
  *
  * <h2>When to Use</h2>
@@ -135,7 +137,7 @@ public final class SingleFlight<K, V> {
      * @throws IllegalArgumentException if {@code key} or {@code supplier} is {@code null}
      * @throws RuntimeException         if the supplier throws a {@code RuntimeException}
      * @throws Error                    if the supplier throws an {@code Error}
-     * @throws IllegalStateException    if the execution is interrupted or fails unexpectedly
+     * @throws IllegalStateException    if the execution throws an unexpected exception type
      * @see #runDefault(Object, Supplier)
      */
     public V run(K key, Supplier<V> supplier) {
@@ -218,7 +220,7 @@ public final class SingleFlight<K, V> {
      * @throws IllegalArgumentException if {@code key} or {@code supplier} is {@code null}
      * @throws RuntimeException         if the supplier throws a {@code RuntimeException}
      * @throws Error                    if the supplier throws an {@code Error}
-     * @throws IllegalStateException    if the execution is interrupted or fails unexpectedly
+     * @throws IllegalStateException    if the execution throws an unexpected exception type
      * @see #run(Object, Supplier)
      */
     @SuppressWarnings("unchecked")
@@ -248,6 +250,8 @@ public final class SingleFlight<K, V> {
          * <p> If {@code false}, subsequent calls will re-execute the task.
          *
          * <p>Default is {@code false}.
+         *
+         * @since 0.2.0
          */
         private boolean cacheException;
 
