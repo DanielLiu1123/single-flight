@@ -3,6 +3,8 @@ package singleflight;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Supplier;
+import lombok.Builder;
+import lombok.Getter;
 
 /**
  * A high-performance, thread-safe "single-flight" utility that prevents duplicate execution
@@ -94,13 +96,13 @@ public final class SingleFlight<K, V> {
     private static final SingleFlight<Object, Object> DEFAULT = new SingleFlight<>();
 
     private final Options options;
-    private final ConcurrentMap<K, Task<V>> invocationMap = new ConcurrentHashMap<>();
+    private final ConcurrentMap<K, Task> invocationMap = new ConcurrentHashMap<>();
 
     /**
      * Creates a new SingleFlight instance with default options.
      */
     public SingleFlight() {
-        this(Options.DEFAULTS);
+        this(Options.DEFAULT);
     }
 
     /**
@@ -146,24 +148,50 @@ public final class SingleFlight<K, V> {
 
         // 1) Atomically create or fetch a Task for the key
         //    Only the first thread will create the task; others will get the existing one
-        Task<V> task = invocationMap.computeIfAbsent(key, k -> new Task<>(supplier));
+        Task task = invocationMap.computeIfAbsent(key, k -> new Task(supplier, options));
 
-        boolean exceptionOccurred = false;
         try {
             // 2) Execute the task - first thread runs the task, others wait
             //    The Task class ensures thread-safe execution and result sharing
-            return task.run();
-        } catch (Exception | Error e) {
-            exceptionOccurred = true;
-            throw e;
-        } finally {
-            // 3) Cleanup logic based on execution outcome and configuration
-            //    - For successful executions: always remove to prevent memory leaks
-            //    - For exceptions with recomputeOnException=true: remove to allow retry
-            //    - For exceptions with recomputeOnException=false: keep to cache exception
-            if (!exceptionOccurred || options.isRecomputeOnException()) {
-                invocationMap.remove(key, task);
+            Result result = task.run();
+
+            Throwable e = result.getException();
+            if (e == null) {
+                return getValue(result);
             }
+
+            handleException(e);
+
+            // Never happen
+            return null;
+        } finally {
+            // 3) Clean up the task from the map
+            //    Ensures that the next call with the same key will execute the task again
+            invocationMap.remove(key, task);
+        }
+    }
+
+    private V getValue(Result result) {
+        try {
+            @SuppressWarnings("unchecked")
+            V v = (V) result.getValue();
+            return v;
+        } catch (ClassCastException e) {
+            throw new IllegalStateException("Result type mismatch", e);
+        }
+    }
+
+    private static void handleException(Throwable e) {
+        if (e instanceof Exception) {
+            if (e instanceof RuntimeException) {
+                throw (RuntimeException) e;
+            } else {
+                throw new IllegalStateException("Execution failed", e);
+            }
+        } else if (e instanceof Error) {
+            throw (Error) e;
+        } else {
+            throw new IllegalStateException("Unexpected exception type", e);
         }
     }
 
@@ -206,70 +234,27 @@ public final class SingleFlight<K, V> {
      *
      * @since 0.2.0
      */
+    @Builder(toBuilder = true)
+    @Getter
     public static final class Options {
 
         /**
-         * Default options with recomputeOnException set to true (backward compatible behavior).
+         * Whether to cache exceptions.
+         *
+         * <p> If {@code true}, exceptions thrown by the task
+         * will be cached and subsequent calls with the same key will immediately throw the
+         * cached exception without re-executing the task.
+         *
+         * <p> If {@code false}, subsequent calls will re-execute the task.
+         *
+         * <p>Default is {@code false}.
          */
-        public static final Options DEFAULTS = new Options(true);
-
-        private final boolean recomputeOnException;
-
-        private Options(boolean recomputeOnException) {
-            this.recomputeOnException = recomputeOnException;
-        }
+        private boolean cacheException;
 
         /**
-         * Creates a new Options builder.
-         *
-         * @return a new OptionsBuilder instance
+         * Default options.
          */
-        public static OptionsBuilder builder() {
-            return new OptionsBuilder();
-        }
-
-        /**
-         * Returns whether exceptions should trigger recomputation on subsequent calls.
-         *
-         * <p>When {@code true} (default), if a supplier throws an exception, the task
-         * is removed from the cache and subsequent calls with the same key will execute
-         * the supplier again.
-         *
-         * <p>When {@code false}, exceptions are cached and subsequent calls with the
-         * same key will immediately throw the cached exception without re-executing
-         * the supplier.
-         *
-         * @return true if exceptions should trigger recomputation, false if exceptions should be cached
-         */
-        public boolean isRecomputeOnException() {
-            return recomputeOnException;
-        }
-
-        /**
-         * Builder for creating Options instances.
-         */
-        public static final class OptionsBuilder {
-            private boolean recomputeOnException = true; // Default to backward compatible behavior
-
-            /**
-             * Sets whether exceptions should trigger recomputation on subsequent calls.
-             *
-             * @param recomputeOnException true to recompute on exception, false to cache exceptions
-             * @return this builder instance
-             */
-            public OptionsBuilder recomputeOnException(boolean recomputeOnException) {
-                this.recomputeOnException = recomputeOnException;
-                return this;
-            }
-
-            /**
-             * Builds the Options instance.
-             *
-             * @return a new Options instance with the configured settings
-             */
-            public Options build() {
-                return new Options(recomputeOnException);
-            }
-        }
+        public static final Options DEFAULT =
+                Options.builder().cacheException(false).build();
     }
 }
