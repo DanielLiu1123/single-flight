@@ -29,7 +29,7 @@ With Single Flight:
 │ Thread-3 (key:"user_123") ──► Wait       ──► Result-1        │
 │ Thread-4 (key:"user_123") ──► Wait       ──► Result-1        │
 └──────────────────────────────────────────────────────────────┘
-Result: 1 database call, all threads share the same result/exception
+Result: 1 database call, all threads share the same result
 ```
 
 ## 🚀 Quick Start
