@@ -6,10 +6,11 @@
 
 **Single Flight** is used to prevent the duplicate execution of expensive operations in concurrent environments.
 
-## 🎯 What is Single Flight?
+## Overview
 
-The [Single Flight pattern](https://www.codingexplorations.com/blog/understanding-singleflight-in-golang-a-solution-for-eliminating-redundant-work) is a concurrency control mechanism that ensures expensive operations (like database queries, API calls, or complex computations) 
-are executed **only once per key** when multiple threads request the same resource concurrently.
+The [Single Flight pattern](https://www.codingexplorations.com/blog/understanding-singleflight-in-golang-a-solution-for-eliminating-redundant-work)
+is a concurrency control mechanism that ensures expensive operations (such as database queries, API calls, or complex
+computations) are executed **only once per key** when multiple threads request the same resource concurrently.
 
 ```text
 Without Single Flight:
@@ -32,7 +33,7 @@ With Single Flight:
 Result: 1 database call, all threads share the same result
 ```
 
-## 🚀 Quick Start
+## Getting Started
 
 ### Installation
 
@@ -83,19 +84,25 @@ User user = userSingleFlight.run("123", () -> {
 });
 ```
 
-## 🤔 When to Use Single Flight
+## Use Cases
 
-### ✅ Perfect For:
+### Recommended Scenarios
+
+Single Flight is particularly effective in the following scenarios:
+
 - **Database queries** with high cache miss rates
 - **External API calls** that are expensive or rate-limited
 - **Complex computations** that are CPU-intensive
-- **Cache warming** scenarios to prevent stampedes
+- **Cache warming** operations to prevent cache stampedes
 
-### ❌ Not Suitable For:
-- Operations that should always execute (like logging)
-- Very fast operations where coordination overhead exceeds benefits
-- Operations with side effects that must happen for each call
+### Not Recommended For
 
-## 📄 License
+Single Flight should be avoided in these situations:
+
+- Operations that must always execute independently (e.g., logging, metrics collection)
+- Very fast operations where coordination overhead exceeds the benefits
+- Operations with side effects that need to occur for each individual call
+
+## License
 
 The MIT License.
