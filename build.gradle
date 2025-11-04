@@ -8,15 +8,14 @@ allprojects {
     apply plugin: "java"
     apply plugin: "java-library"
 
-    java {
-        toolchain {
-            languageVersion = JavaLanguageVersion.of(8)
-        }
-    }
-
     javadoc {
         // Suppress warnings about missing Javadoc comments
         options.addStringOption('Xdoclint:none', '-quiet')
+    }
+
+    java {
+        sourceCompatibility = 17
+        targetCompatibility = 17
     }
 
     repositories {
@@ -33,22 +32,19 @@ allprojects {
     }
 
     dependencies {
-        compileOnly("org.projectlombok:lombok:${lombokVersion}")
-        annotationProcessor("org.projectlombok:lombok:${lombokVersion}")
-        testCompileOnly("org.projectlombok:lombok:${lombokVersion}")
-        testAnnotationProcessor("org.projectlombok:lombok:${lombokVersion}")
+        compileOnly("org.projectlombok:lombok:+")
+        annotationProcessor("org.projectlombok:lombok:+")
+        testCompileOnly("org.projectlombok:lombok:+")
+        testAnnotationProcessor("org.projectlombok:lombok:+")
 
-        testImplementation("org.junit.jupiter:junit-jupiter:${junitVersion}")
-        testRuntimeOnly("org.junit.platform:junit-platform-launcher:${junitPlatformVersion}")
-        testImplementation("org.assertj:assertj-core:${assertjVersion}")
+        testImplementation(platform("org.junit:junit-bom:+"))
+        testImplementation("org.junit.jupiter:junit-jupiter")
+        testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+        testImplementation("org.assertj:assertj-core:+")
     }
 
     test {
         useJUnitPlatform()
-        dependencies {
-            // https://docs.gradle.org/current/userguide/upgrading_version_8.html#test_framework_implementation_dependencies
-            testRuntimeOnly("org.junit.platform:junit-platform-launcher:${junitPlatformVersion}")
-        }
     }
 
     // spotless

@@ -2,9 +2,8 @@ package singleflight;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
-import lombok.Builder;
-import lombok.Getter;
 
 /**
  * A high-performance, thread-safe "single-flight" utility that prevents duplicate execution
@@ -117,6 +116,51 @@ public final class SingleFlight<K, V> {
     }
 
     /**
+     * Convenience method that executes the supplier using a shared default SingleFlight instance.
+     * This is equivalent to creating a static SingleFlight instance and calling {@link #run(Object, Supplier)}.
+     *
+     * <p>This method is perfect for simple use cases where you don't need multiple isolated
+     * SingleFlight instances. All calls to this method share the same key space.
+     *
+     * <h3>Usage Examples</h3>
+     *
+     * <pre>{@code
+     * User user = SingleFlight.runDefault("user:" + userId, () -> {
+     *     return database.findUserById(userId);
+     * });
+     * }</pre>
+     *
+     * @param <K>      the type of the key
+     * @param <V>      the type of the value returned by the supplier
+     * @param key      the unique identifier for this operation. Must not be {@code null}.
+     * @param supplier the operation to execute. Must not be {@code null}.
+     * @return the result of the supplier execution
+     * @throws IllegalArgumentException if {@code key} or {@code supplier} is {@code null}
+     * @throws RuntimeException         if the supplier throws a {@code RuntimeException}
+     * @throws Error                    if the supplier throws an {@code Error}
+     * @throws IllegalStateException    if the execution throws an unexpected exception type
+     * @see #run(Object, Supplier)
+     */
+    @SuppressWarnings("unchecked")
+    public static <K, V> V runDefault(K key, Supplier<V> supplier) {
+        return ((SingleFlight<K, V>) DEFAULT).run(key, supplier);
+    }
+
+    private static void handleException(Throwable e) {
+        if (e instanceof Exception) {
+            if (e instanceof RuntimeException) {
+                throw (RuntimeException) e;
+            } else {
+                throw new IllegalStateException("Execution failed", e);
+            }
+        } else if (e instanceof Error) {
+            throw (Error) e;
+        } else {
+            throw new IllegalStateException("Unexpected exception type", e);
+        }
+    }
+
+    /**
      * Executes the given supplier for the specified key, ensuring that concurrent calls
      * with the same key will result in only one execution of the supplier. Other threads
      * will wait for the result and share it.
@@ -157,7 +201,7 @@ public final class SingleFlight<K, V> {
             //    The Task class ensures thread-safe execution and result sharing
             Result result = task.run();
 
-            Throwable e = result.getException();
+            Throwable e = result.exception();
             if (e == null) {
                 return getValue(result);
             }
@@ -176,56 +220,11 @@ public final class SingleFlight<K, V> {
     private V getValue(Result result) {
         try {
             @SuppressWarnings("unchecked")
-            V v = (V) result.getValue();
+            V v = (V) result.value();
             return v;
         } catch (ClassCastException e) {
             throw new IllegalStateException("Result type mismatch", e);
         }
-    }
-
-    private static void handleException(Throwable e) {
-        if (e instanceof Exception) {
-            if (e instanceof RuntimeException) {
-                throw (RuntimeException) e;
-            } else {
-                throw new IllegalStateException("Execution failed", e);
-            }
-        } else if (e instanceof Error) {
-            throw (Error) e;
-        } else {
-            throw new IllegalStateException("Unexpected exception type", e);
-        }
-    }
-
-    /**
-     * Convenience method that executes the supplier using a shared default SingleFlight instance.
-     * This is equivalent to creating a static SingleFlight instance and calling {@link #run(Object, Supplier)}.
-     *
-     * <p>This method is perfect for simple use cases where you don't need multiple isolated
-     * SingleFlight instances. All calls to this method share the same key space.
-     *
-     * <h3>Usage Examples</h3>
-     *
-     * <pre>{@code
-     * User user = SingleFlight.runDefault("user:" + userId, () -> {
-     *     return database.findUserById(userId);
-     * });
-     * }</pre>
-     *
-     * @param <K>      the type of the key
-     * @param <V>      the type of the value returned by the supplier
-     * @param key      the unique identifier for this operation. Must not be {@code null}.
-     * @param supplier the operation to execute. Must not be {@code null}.
-     * @return the result of the supplier execution
-     * @throws IllegalArgumentException if {@code key} or {@code supplier} is {@code null}
-     * @throws RuntimeException         if the supplier throws a {@code RuntimeException}
-     * @throws Error                    if the supplier throws an {@code Error}
-     * @throws IllegalStateException    if the execution throws an unexpected exception type
-     * @see #run(Object, Supplier)
-     */
-    @SuppressWarnings("unchecked")
-    public static <K, V> V runDefault(K key, Supplier<V> supplier) {
-        return ((SingleFlight<K, V>) DEFAULT).run(key, supplier);
     }
 
     /**
@@ -236,9 +235,12 @@ public final class SingleFlight<K, V> {
      *
      * @since 0.2.0
      */
-    @Builder(toBuilder = true)
-    @Getter
     public static final class Options {
+        /**
+         * Default options.
+         */
+        public static final Options DEFAULT =
+                Options.builder().cacheException(false).build();
 
         /**
          * Whether to cache exceptions.
@@ -253,12 +255,80 @@ public final class SingleFlight<K, V> {
          *
          * @since 0.2.0
          */
-        private boolean cacheException;
+        private final boolean cacheException;
 
-        /**
-         * Default options.
-         */
-        public static final Options DEFAULT =
-                Options.builder().cacheException(false).build();
+        Options(OptionsBuilder builder) {
+            this.cacheException = builder.cacheException;
+        }
+
+        public static OptionsBuilder builder() {
+            return new OptionsBuilder();
+        }
+
+        public boolean isCacheException() {
+            return this.cacheException;
+        }
+
+        public OptionsBuilder toBuilder() {
+            return new OptionsBuilder().cacheException(this.cacheException);
+        }
+
+        public static class OptionsBuilder {
+            private boolean cacheException;
+
+            OptionsBuilder() {}
+
+            public OptionsBuilder cacheException(boolean cacheException) {
+                this.cacheException = cacheException;
+                return this;
+            }
+
+            public Options build() {
+                return new Options(this);
+            }
+
+            public String toString() {
+                return "SingleFlight.Options.OptionsBuilder(cacheException=" + this.cacheException + ")";
+            }
+        }
+    }
+
+    private record Result(Object value, Throwable exception) {}
+
+    private static final class Task {
+
+        private final Supplier<?> task;
+        private final Options options;
+        private final ReentrantLock lock = new ReentrantLock();
+
+        private volatile Result result;
+
+        public Task(Supplier<?> supplier, Options options) {
+            this.task = supplier;
+            this.options = options;
+        }
+
+        public Result run() {
+            Result r = result;
+            if (r == null) {
+                lock.lock();
+                try {
+                    r = result;
+                    if (r == null) {
+                        try {
+                            r = new Result(task.get(), null);
+                        } catch (Throwable e) {
+                            r = new Result(null, e);
+                        }
+                        if (r.exception() == null || options.isCacheException()) {
+                            result = r;
+                        }
+                    }
+                } finally {
+                    lock.unlock();
+                }
+            }
+            return r;
+        }
     }
 }
