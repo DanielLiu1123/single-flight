@@ -52,6 +52,12 @@ Result: 1 database call, all threads share the same result
 implementation "io.github.danielliu1123:single-flight:<latest>"
 ```
 
+**Used as source:**
+
+```shell
+mkdir -p singleflight && curl -L -o singleflight/SingleFlight.java https://raw.githubusercontent.com/DanielLiu1123/single-flight/refs/heads/main/single-flight/src/main/java/singleflight/SingleFlight.java
+```
+
 ### Usage
 
 ```java
