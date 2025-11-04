@@ -2,7 +2,7 @@
 
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.danielliu1123/single-flight)](https://central.sonatype.com/artifact/io.github.danielliu1123/single-flight)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Java Version](https://img.shields.io/badge/Java-8%2B-blue.svg)](https://openjdk.java.net/)
+[![Java Version](https://img.shields.io/badge/Java-17%2B-blue.svg)](https://openjdk.org/)
 
 **Single Flight** is used to prevent the duplicate execution of expensive operations in concurrent environments.
 
